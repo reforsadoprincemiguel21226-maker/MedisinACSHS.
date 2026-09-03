@@ -42,7 +42,7 @@
             </div>
 
             <div class="assistant-actions" aria-label="Conversation controls">
-                <button class="header-btn" id="toggle-voice-playback" type="button" title="Turn voice replies off" aria-label="Turn voice replies off" aria-pressed="true">
+                <button class="header-btn" id="toggle-voice-playback" type="button" title="Voice replies are disabled" aria-label="Voice replies are disabled" aria-pressed="false" disabled>
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M11 5 6 9H3v6h3l5 4z"></path>
                         <path d="M15.5 8.5a5 5 0 0 1 0 7"></path>
@@ -95,17 +95,15 @@
     </div>
 </main>
 
-<script src="data/qa-data.js"></script>
 <script src="data/hospitals-data.js"></script>
 <script>
 const CHAT_API_URL = '/api/chat';
 
-const USE_LOCAL_MOCK = true;
-
 const SYSTEM_CONTEXT =
     `You are MedisinACSHS, a helpful AI medical assistant for the ACSHS.
 Keep responses clear, concise, and compassionate.
-If the user sends a greeting like hello, hi, or hey, reply with: Hello, how can I help you?`;
+If the user sends a greeting like hello, hi, or hey, reply with: Hello, how can I help you?
+When the answer is based on retrieved health data, explain the relevant steps and end with one useful follow-up question only when more information is needed.`;
 
 const chatForm   = document.querySelector('.chat-input');
 const chatInput  = document.getElementById('assistant-message');
@@ -125,7 +123,7 @@ const conversationHistory = [];
 let recognition;
 let isListening = false;
 let isAwaitingResponse = false;
-let autoSpeakReplies = synthesisSupported;
+let autoSpeakReplies = false;
 let availableVoices = [];
 let recognitionStartTimer;
 
@@ -196,8 +194,8 @@ function speakReply(text) {
         utterance.lang = preferredVoice.lang;
     }
 
-    utterance.rate = 1.32;
-    utterance.pitch = 1;
+    utterance.rate = 0.9;
+    utterance.pitch = 1.2;
     window.speechSynthesis.speak(utterance);
 }
 
@@ -206,20 +204,11 @@ function updateVoicePlaybackButton() {
         return;
     }
 
-    if (!synthesisSupported) {
-        voicePlaybackBtn.disabled = true;
-        voicePlaybackBtn.title = 'Voice replies are not supported in this browser';
-        voicePlaybackBtn.setAttribute('aria-label', 'Voice replies are not supported in this browser');
-        voicePlaybackBtn.setAttribute('aria-pressed', 'false');
-        return;
-    }
-
-    const title = autoSpeakReplies ? 'Turn voice replies off' : 'Turn voice replies on';
-    voicePlaybackBtn.disabled = false;
-    voicePlaybackBtn.title = title;
-    voicePlaybackBtn.setAttribute('aria-label', title);
-    voicePlaybackBtn.setAttribute('aria-pressed', String(autoSpeakReplies));
-    voicePlaybackBtn.classList.toggle('is-muted', !autoSpeakReplies);
+    voicePlaybackBtn.disabled = true;
+    voicePlaybackBtn.title = 'Voice replies are disabled';
+    voicePlaybackBtn.setAttribute('aria-label', 'Voice replies are disabled');
+    voicePlaybackBtn.setAttribute('aria-pressed', 'false');
+    voicePlaybackBtn.classList.add('is-muted');
 }
 
 function updateVoiceInputButton() {
@@ -429,6 +418,21 @@ function addUserMessage(text) {
     chatShell.scrollTop = chatShell.scrollHeight;
 }
 
+function escapeHtml(text) {
+    return String(text).replace(/[&<>"']/g, (character) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    }[character]));
+}
+
+function renderInlineMarkdown(text) {
+    let html = escapeHtml(text);
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    html = html.replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, boldA, boldB) => `<strong>${boldA || boldB}</strong>`);
+    html = html.replace(/\*([^*]+)\*|_([^_]+)_/g, (_, italicA, italicB) => `<em>${italicA || italicB}</em>`);
+    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    return html;
+}
+
 function addAssistantMessage(text) {
     const article = document.createElement('article');
     article.className = 'message message-assistant';
@@ -440,15 +444,20 @@ function addAssistantMessage(text) {
         <time>${getTime()}</time>`;
     const timeEl = article.querySelector('time');
 
-    const paragraphs = String(text)
+    const lines = String(text)
+        .replace(/<br\s*\/?\s*>/gi, '\n')
         .split(/\n+/)
         .map((line) => line.trim())
         .filter(Boolean);
 
-    (paragraphs.length ? paragraphs : [String(text)]).forEach((line) => {
-        const p = document.createElement('p');
-        p.textContent = line;
-        article.insertBefore(p, timeEl);
+    (lines.length ? lines : [String(text)]).forEach((line) => {
+        const heading = line.match(/^#{1,3}\s+(.+)$/);
+        const unordered = line.match(/^[-*]\s+(.+)$/);
+        const ordered = line.match(/^\d+[.)]\s+(.+)$/);
+        const element = document.createElement(heading ? 'h3' : (unordered || ordered) ? 'p' : 'p');
+        element.innerHTML = renderInlineMarkdown((heading || unordered || ordered || [null, line])[1]);
+        if (unordered || ordered) element.className = 'message-list-item';
+        article.insertBefore(element, timeEl);
     });
 
     chatShell.appendChild(article);
@@ -503,18 +512,6 @@ function normalize(str) {
         .trim();
 }
 
-const STOPWORDS = new Set([
-    'ang', 'ng', 'ko', 'mo', 'na', 'ba', 'po', 'opo', 'ito', 'yun', 'yung',
-    'ay', 'si', 'ni', 'kay', 'din', 'rin', 'lang', 'naman', 'kasi', 'pa',
-    'raw', 'daw', 'ho', 'oo', 'ka', 'kayo', 'tayo', 'kami', 'sila', 'niya',
-    'nila', 'namin', 'natin', 'doon', 'dito', 'paano', 'pano', 'ano',
-    'sino', 'saan', 'kailan', 'bakit', 'sa',
-    'a', 'an', 'the', 'is', 'are', 'am', 'it', 'to', 'of', 'in', 'on',
-    'and', 'for', 'with', 'my', 'your', 'his', 'her', 'their', 'our',
-    'has', 'have', 'had', 'you', 'i', 'me', 'we', 'do', 'did', 'does',
-    'this', 'that', 'these', 'those', 'be', 'was', 'were'
-]);
-
 const HOSPITAL_TRIGGER_WORDS = [
     'hospital', 'ospital', 'clinic', 'locator', 'nearest hospital',
     'malapit na ospital', 'malapit na hospital', 'near me', 'nearby hospital'
@@ -567,55 +564,10 @@ function buildHospitalReply(canonicalTown, rawTownText) {
     return lines.join('\n');
 }
 
-function scoreEntry(entry, normalizedInput, inputTokens) {
-    let bestPhraseScore = 0;
-    for (const phrase of entry.keywords) {
-        const words = normalize(phrase).split(' ').filter((w) => w && !STOPWORDS.has(w));
-        if (!words.length) continue;
-        const matchedWords = words.filter((w) =>
-            w.length <= 3 ? inputTokens.has(w) : normalizedInput.includes(w)
-        );
-        const phraseScore = matchedWords.length === words.length
-            ? words.length + 1
-            : matchedWords.length * 0.5;
-
-        if (phraseScore > bestPhraseScore) {
-            bestPhraseScore = phraseScore;
-        }
-    }
-    return bestPhraseScore;
-}
-
-function findBestQaMatch(normalizedInput) {
-    const inputTokens = new Set(normalizedInput.split(' ').filter(Boolean));
-    let best = null;
-    let bestScore = 0;
-    for (const entry of (window.MEDISIN_QA || [])) {
-        const score = scoreEntry(entry, normalizedInput, inputTokens);
-        if (score > bestScore) {
-            bestScore = score;
-            best = entry;
-        }
-    }
-    return bestScore >= 1 ? best : null;
-}
-
-const FALLBACK_REPLY = `I don't have an exact match for that yet. Could you describe the symptom or injury a bit more? You can also type "hospital near me" to find a nearby hospital. If this feels like an emergency, please call 911 or tell an adult right away.`;
-
-const GENERIC_SYMPTOM_WORDS = [
-    'sakit', 'masakit', 'pananakit', 'sumasakit', 'nananakit',
-    'hurt', 'hurts', 'pain', 'painful', 'ouch', 'aray'
-];
-
-function isVagueSymptomMention(inputTokens) {
-    return GENERIC_SYMPTOM_WORDS.some((word) => inputTokens.has(normalize(word)));
-}
-
-const VAGUE_SYMPTOM_REPLY = `Where does it hurt specifically, and how much — mild, moderate, or severe? Let me know the exact body part and if there are other symptoms too (like fever, swelling, or bleeding), and I can guide you from there. If the pain is severe or getting worse quickly, please tell an adult and seek medical help right away.`;
-
-function getLocalReply(userText) {
+// Hospital lookup is deterministic data (data/hospitals-data.js), not RAG —
+// answer it instantly client-side instead of round-tripping to the model.
+function tryHospitalReply(userText) {
     const normalizedInput = normalize(userText);
-    const inputTokens = new Set(normalizedInput.split(' ').filter(Boolean));
 
     if (awaitingTown) {
         awaitingTown = false;
@@ -632,25 +584,7 @@ function getLocalReply(userText) {
         return `Sure — which town or city are you nearest to? (e.g., Antipolo, Taytay, Cainta, Angono, Binangonan, Montalban/Rodriguez, San Mateo, Tanay, Pililla)`;
     }
 
-    const match = findBestQaMatch(normalizedInput);
-    if (match) {
-        return match.reply;
-    }
-
-    if (isVagueSymptomMention(inputTokens)) {
-        return VAGUE_SYMPTOM_REPLY;
-    }
-
-    return FALLBACK_REPLY;
-}
-
-function wait(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function sendToAssistantLocal(userText) {
-    await wait(500 + Math.random() * 900);
-    return getLocalReply(userText);
+    return null;
 }
 
 async function sendToAssistantLive(userText) {
@@ -665,7 +599,13 @@ async function sendToAssistantLive(userText) {
         })
     });
 
-    const data = await response.json();
+    const responseText = await response.text();
+    let data;
+    try {
+        data = responseText ? JSON.parse(responseText) : {};
+    } catch {
+        throw new Error(`The server returned an invalid response (${response.status}). Please restart the server and try again.`);
+    }
 
     if (!response.ok) {
         const detail = data?.error || data?.detail || `Server error ${response.status}`;
@@ -678,7 +618,13 @@ async function sendToAssistantLive(userText) {
 }
 
 async function sendToAssistant(userText) {
-    return USE_LOCAL_MOCK ? sendToAssistantLocal(userText) : sendToAssistantLive(userText);
+    const hospitalReply = tryHospitalReply(userText);
+    if (hospitalReply !== null) {
+        conversationHistory.push({ role: 'user', parts: [{ text: userText }] });
+        conversationHistory.push({ role: 'model', parts: [{ text: hospitalReply }] });
+        return hospitalReply;
+    }
+    return sendToAssistantLive(userText);
 }
 
 async function handleSend(text) {
@@ -698,7 +644,6 @@ async function handleSend(text) {
         const reply = await sendToAssistant(msg);
         hideTyping();
         addAssistantMessage(reply);
-        speakReply(reply);
     } catch (err) {
         hideTyping();
         addAssistantMessage(`Sorry, something went wrong: ${err.message}`);
