@@ -8,12 +8,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icon-white-192.png">
+<link rel="apple-touch-icon" href="assets/images/icon-white-192.png">
 <link rel="stylesheet" href="css/feature-pages.css">
 </head>
 <body>
 <a class="site-logo-link" href="home.html" aria-label="Go to home page">
-    <img src="logoACSHS.png" alt="ACSHS logo" class="site-logo">
+    <img src="assets/images/logoACSHS.png" alt="ACSHS logo" class="site-logo">
 </a>
 <main class="page-shell">
     <div class="top-bar">
@@ -52,10 +52,16 @@
 
             <button type="submit" class="medalendar-submit">BOOK APPOINTMENT</button>
         </form>
+
+        <div class="calendar-tools" aria-label="Calendar import and export">
+            <label for="ics-import">IMPORT AN ICS FILE</label>
+            <input id="ics-import" type="file" accept=".ics,text/calendar">
+            <p id="ics-status" role="status"></p>
+        </div>
     </section>
 </main>
 
-<script src="pwa-register.js"></script>
+<script src="assets/js/pwa-register.js"></script>
 <script>
 const medalendarForm = document.querySelector('.medalendar-form');
 
@@ -121,6 +127,55 @@ function buildGoogleCalendarUrl({ title, details, start, end }) {
     const dates = `${toGoogleCalendarDate(start)}/${toGoogleCalendarDate(end)}`;
     return `${baseUrl}&text=${text}&details=${description}&dates=${dates}`;
 }
+
+function unescapeICSField(value) {
+    return String(value || '')
+        .replace(/\\n/gi, '\n')
+        .replace(/\\([\\;,])/g, '$1');
+}
+
+function parseICSDate(value) {
+    const match = String(value || '').match(/^(\d{4})(\d{2})(\d{2})T?(\d{2})?(\d{2})?(\d{2})?/);
+    if (!match) return '';
+    const [, year, month, day, hours = '00', minutes = '00'] = match;
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function importICS(text) {
+    const unfolded = text.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
+    const event = {};
+    unfolded.forEach((line) => {
+        const separator = line.indexOf(':');
+        if (separator < 0) return;
+        const key = line.slice(0, separator).split(';')[0].toUpperCase();
+        if (['SUMMARY', 'DESCRIPTION', 'DTSTART', 'DTEND'].includes(key)) {
+            event[key] = unescapeICSField(line.slice(separator + 1));
+        }
+    });
+
+    const summary = event.SUMMARY || '';
+    const patientName = summary.replace(/^Medical Appointment\s*-\s*/i, '').trim();
+    const medication = (event.DESCRIPTION || '').replace(/^Medication\s*:\s*/i, '').trim().toLowerCase();
+    if (patientName) document.getElementById('full-name').value = patientName;
+    if ([...document.getElementById('drug-name').options].some((option) => option.value === medication)) {
+        document.getElementById('drug-name').value = medication;
+    }
+    document.getElementById('start-time').value = parseICSDate(event.DTSTART);
+    document.getElementById('end-time').value = parseICSDate(event.DTEND);
+    return Boolean(event.SUMMARY && event.DTSTART && event.DTEND);
+}
+
+document.getElementById('ics-import').addEventListener('change', async (event) => {
+    const file = event.target.files[0];
+    const status = document.getElementById('ics-status');
+    if (!file) return;
+    try {
+        const imported = importICS(await file.text());
+        status.textContent = imported ? 'Calendar event imported. Review the details, then book or export it.' : 'This ICS file does not contain a supported appointment.';
+    } catch {
+        status.textContent = 'Could not read this ICS file.';
+    }
+});
 
 medalendarForm.addEventListener('submit', async (event) => {
     event.preventDefault();

@@ -3,12 +3,12 @@ const STATIC_ASSETS = [
   '/',
   '/index.html',
   '/home.html',
-  '/style.css',
+  '/css/style.css',
   '/css/home.css',
   '/css/ai-assistant.css',
-  '/logoACSHS.png',
-  '/icon-white-192.png',
-  '/icon-white-512.png',
+  '/assets/images/logoACSHS.png',
+  '/assets/images/icon-white-192.png',
+  '/assets/images/icon-white-512.png',
   '/A.i%20asistant.html',
   '/data/hospitals-data.js'
 ];
